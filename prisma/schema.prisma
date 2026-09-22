@@ -5,8 +5,9 @@
 // ─────────────────────────────────────────────────────────────
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")          // Vercel-Neon entegrasyonunun otomatik enjekte ettiği, havuzlanmış (pgbouncer) bağlantı
+  directUrl = env("DATABASE_URL_UNPOOLED") // sadece `prisma migrate` için — havuzsuz bağlantı
 }
 
 generator client {
