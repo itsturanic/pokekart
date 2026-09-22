@@ -21,7 +21,9 @@ export async function POST(req: NextRequest) {
   const drawn = openPack(pack.packSlots, 10); // 10 kartlık paket varsayımı
 
   await prisma.wallet.update({ where: { userId }, data: { balance: { decrement: pack.price } } });
-  await prisma.packOpenLog.create({ data: { userId, packId, resultJson: drawn } });
+  await prisma.packOpenLog.create({
+    data: { userId, packId, resultJson: JSON.parse(JSON.stringify(drawn)) },
+  });
   const cardInstances = await prisma.cardInstance.createManyAndReturn({
     data: drawn.map((slot) => ({
       userId,
