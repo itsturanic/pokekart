@@ -1,0 +1,188 @@
+// ─────────────────────────────────────────────────────────────
+// PokeKart — Prisma Schema (v2, borsasız)
+// Sanal jetonla paket aç, kart topla, deste kur, savaş.
+// Fiyat grafiği / arz-talep motoru / kullanıcılar arası alım-satım YOK.
+// ─────────────────────────────────────────────────────────────
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ── Kullanıcı & Cüzdan ──────────────────────────────────────
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  name          String
+  avatarUrl     String?
+  createdAt     DateTime @default(now())
+
+  wallet        Wallet?
+  cardInstances CardInstance[]
+  packOpenLogs  PackOpenLog[]
+  purchases     Purchase[]
+  decks         Deck[]
+  battlesAsA    Battle[] @relation("BattlePlayerA")
+  battlesAsB    Battle[] @relation("BattlePlayerB")
+}
+
+model Wallet {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id])
+  balance         Decimal   @default(1000) @db.Decimal(14, 2) // başlangıç jetonu
+  lastDailyClaim  DateTime?
+  updatedAt       DateTime  @updatedAt
+}
+
+// ── Kart Kataloğu ────────────────────────────────────────────
+
+model CardSet {
+  id          String    @id @default(cuid())
+  name        String    // "Prismatic Evolutions"
+  series      String    // "Scarlet & Violet"
+  releaseDate DateTime?
+  imageUrl    String?
+  products    Product[]
+  cards       CardDefinition[]
+}
+
+// Gerçek oyun istatistiklerine sahip kart tanımı (savaşta kullanılır)
+model CardDefinition {
+  id          String   @id @default(cuid())
+  setId       String
+  set         CardSet  @relation(fields: [setId], references: [id])
+  name        String
+  pokedexType String   // "Fire", "Water", "Electric" vb.
+  rarity      String   // "Common" ... "Secret Rare"
+  hp          Int
+  attack      Int
+  defense     Int
+  imageUrl    String?
+
+  packSlots     PackSlot[]
+  cardInstances CardInstance[]
+}
+
+enum ProductType {
+  BOOSTER_BOX
+  BOOSTER_PACK
+  ETB
+  COLLECTION_BOX
+}
+
+// Mağazada SABİT fiyattan satılan ürün (paket/kutu). Fiyat dalgalanmaz.
+model Product {
+  id       String      @id @default(cuid())
+  setId    String
+  set      CardSet     @relation(fields: [setId], references: [id])
+  type     ProductType
+  name     String
+  imageUrl String?
+  price    Decimal     @db.Decimal(14, 2) // sabit satış fiyatı
+
+  packSlots PackSlot[] @relation("PackContents")
+  purchases Purchase[]
+}
+
+// Bir booster pack açıldığında hangi kartın hangi olasılıkla çıkacağı
+model PackSlot {
+  id         String         @id @default(cuid())
+  packId     String
+  pack       Product        @relation("PackContents", fields: [packId], references: [id])
+  cardId     String
+  card       CardDefinition @relation(fields: [cardId], references: [id])
+  dropWeight Float
+}
+
+// Kullanıcının sahip olduğu kart kopyası (envanter + deste kurmak için havuz)
+model CardInstance {
+  id          String        @id @default(cuid())
+  userId      String
+  user        User          @relation(fields: [userId], references: [id])
+  cardId      String
+  card        CardDefinition @relation(fields: [cardId], references: [id])
+  acquiredVia AcquireSource
+  acquiredAt  DateTime      @default(now())
+
+  deckSlots   DeckCard[]
+}
+
+enum AcquireSource {
+  PACK_OPEN
+  DAILY_REWARD
+  BATTLE_REWARD
+}
+
+model PackOpenLog {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  packId     String
+  resultJson Json     // açılan kartların özeti
+  createdAt  DateTime @default(now())
+}
+
+// Sabit fiyattan satın alma kaydı (borsa YOK — sadece mağaza geçmişi)
+model Purchase {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  quantity  Int
+  total     Decimal  @db.Decimal(14, 2)
+  createdAt DateTime @default(now())
+}
+
+// ── Deste & Savaş ────────────────────────────────────────────
+
+model Deck {
+  id        String     @id @default(cuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id])
+  name      String
+  createdAt DateTime   @default(now())
+  cards     DeckCard[]
+  battlesAsA Battle[]  @relation("DeckA")
+  battlesAsB Battle[]  @relation("DeckB")
+}
+
+// Bir destede tam olarak hangi kart kopyalarının bulunduğu (max N kart uygulama katmanında kontrol edilir)
+model DeckCard {
+  id             String       @id @default(cuid())
+  deckId         String
+  deck           Deck         @relation(fields: [deckId], references: [id])
+  cardInstanceId String
+  cardInstance   CardInstance @relation(fields: [cardInstanceId], references: [id])
+
+  @@unique([deckId, cardInstanceId])
+}
+
+enum BattleResult {
+  A_WON
+  B_WON
+  DRAW
+}
+
+// Basit, istatistik-tabanlı otomatik çözümlenen savaş (tur tur log JSON'da tutulur)
+model Battle {
+  id          String       @id @default(cuid())
+  playerAId   String
+  playerA     User         @relation("BattlePlayerA", fields: [playerAId], references: [id])
+  deckAId     String
+  deckA       Deck         @relation("DeckA", fields: [deckAId], references: [id])
+  playerBId   String
+  playerB     User         @relation("BattlePlayerB", fields: [playerBId], references: [id])
+  deckBId     String
+  deckB       Deck         @relation("DeckB", fields: [deckBId], references: [id])
+  result      BattleResult
+  logJson     Json         // tur tur ne olduğu (UI'da replay göstermek için)
+  createdAt   DateTime     @default(now())
+}
